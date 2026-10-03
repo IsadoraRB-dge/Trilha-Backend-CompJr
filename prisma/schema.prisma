@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StatusAdocao {
+  PENDENTE
+  APROVADO
+  RECUSADO
+  CANCELADO
+}
+
+enum SexoAnimal {
+  M
+  F
+}
+
+enum PorteCachorro {
+  PEQUENO
+  MEDIO
+  GRANDE
+}
+
+model Usuario {
+  idusuarios Int    @id @default(autoincrement())
+  nome       String @map("nome_usuario") @db.VarChar(100)
+  email      String @map("email_usuario") @db.VarChar(100)
+  senha      String @map("senha_usuario") @db.VarChar(255)
+  cep        String @map("cep_usuario") @db.Char(8)
+  logradouro String @map("logradouro_usuario") @db.VarChar(100)
+  bairro     String @map("bairro_usuario") @db.VarChar(100)
+  cidade     String @map("cidade_usuario") @db.VarChar(45)
+
+  pedidos UsuarioHasPedidosAdocao[]
+
+  @@map("usuario")
+}
+
+model PedidosAdocao {
+  ids    Int          @id @default(autoincrement())
+  status StatusAdocao @default(PENDENTE) @map("status_adocao")
+  motivo String       @map("motivo_adocao") @db.Text
+
+  usuarios UsuarioHasPedidosAdocao[]
+  animais  PedidosAdocaoHasAnimal[]
+
+  @@map("pedidos_adocao")
+}
+
+model UsuarioHasPedidosAdocao {
+  usuarioIdusuarios Int @map("usuario_idusuarios")
+  pedidosAdocaoIds  Int @map("pedidos_adocao_ids")
+
+  usuario      Usuario       @relation(fields: [usuarioIdusuarios], references: [idusuarios])
+  pedidoAdocao PedidosAdocao @relation(fields: [pedidosAdocaoIds], references: [ids])
+
+  @@id([usuarioIdusuarios, pedidosAdocaoIds])
+  @@map("usuario_has_pedidos_adocao")
+}
+
+model PedidosAdocaoHasAnimal {
+  pedidosAdocaoIds Int @map("pedidos_adocao_ids")
+  animalIdAnimal   Int @map("animal_id_animal")
+
+  pedidoAdocao PedidosAdocao @relation(fields: [pedidosAdocaoIds], references: [ids])
+  animal       Animal        @relation(fields: [animalIdAnimal], references: [idAnimal])
+
+  @@id([pedidosAdocaoIds, animalIdAnimal])
+  @@map("pedidos_adocao_has_animal")
+}
+
+model Animal {
+  idAnimal  Int        @id @default(autoincrement()) @map("id_animal")
+  nome      String     @map("nome_animal") @db.VarChar(45)
+  sexo      SexoAnimal @map("sexo_animal")
+  castrado  Boolean
+  vacinado  Boolean
+  descricao String     @db.Text
+
+  gato     Gato?
+  cachorro Cachorro?
+  pedidos  PedidosAdocaoHasAnimal[]
+
+  @@map("animal")
+}
+
+model Gato {
+  animalIdAnimal  Int    @id @map("animal_id_animal")
+  testadoFivFelv  Int    @map("testado_fiv_felv")
+  conviveComGatos String @map("convive_com_gatos") @db.VarChar(45)
+
+  animal Animal @relation(fields: [animalIdAnimal], references: [idAnimal], onDelete: Cascade)
+
+  @@map("gato")
+}
+
+model Cachorro {
+  animalIdAnimal      Int           @id @map("animal_id_animal")
+  porte               PorteCachorro @map("porte_cachorro")
+  conviveComCachorros Boolean       @map("convive_com_cachorros")
+
+  animal Animal @relation(fields: [animalIdAnimal], references: [idAnimal], onDelete: Cascade)
+
+  @@map("cachorro")
+}
