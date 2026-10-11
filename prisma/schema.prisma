@@ -7,103 +7,109 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum StatusAdocao {
+enum Perfil {
+  COMUM
+  ADMIN
+}
+
+enum Sexo {
+  M
+  F
+}
+
+enum Porte {
+  PEQUENO
+  MEDIO
+  GRANDE
+}
+
+enum StatusAnimal {
+  DISPONIVEL
+  EM_PROCESSO
+  ADOTADO
+}
+
+enum StatusPedido {
   PENDENTE
   APROVADO
   RECUSADO
   CANCELADO
 }
 
-enum SexoAnimal {
-  M
-  F
-}
-
-enum PorteCachorro {
-  PEQUENO
-  MEDIO
-  GRANDE
-}
-
 model Usuario {
-  idusuarios Int    @id @default(autoincrement())
-  nome       String @map("nome_usuario") @db.VarChar(100)
-  email      String @map("email_usuario") @db.VarChar(100)
-  senha      String @map("senha_usuario") @db.VarChar(255)
-  cep        String @map("cep_usuario") @db.Char(8)
-  logradouro String @map("logradouro_usuario") @db.VarChar(100)
-  bairro     String @map("bairro_usuario") @db.VarChar(100)
-  cidade     String @map("cidade_usuario") @db.VarChar(45)
+  id           Int      @id @default(autoincrement()) @map("id_usuario")
+  nome         String   @map("nome_usuario") @db.VarChar(100)
+  email        String   @unique @map("email_usuario") @db.VarChar(150)
+  senha        String   @map("senha_usuario") @db.VarChar(255)
+  perfil       Perfil   @default(COMUM) @map("perfil_usuario")
+  cep          String   @map("cep_usuario") @db.Char(8)
+  logradouro   String?  @map("logradouro_usuario") @db.VarChar(150)
+  bairro       String?  @map("bairro_usuario") @db.VarChar(100)
+  cidade       String   @map("cidade_usuario") @db.VarChar(100)
+  uf           String   @map("uf_usuario") @db.Char(2)
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
 
-  pedidos UsuarioHasPedidosAdocao[]
+  animais Animal[]
+  pedidos PedidoAdocao[]
 
   @@map("usuario")
 }
 
-model PedidosAdocao {
-  ids    Int          @id @default(autoincrement())
-  status StatusAdocao @default(PENDENTE) @map("status_adocao")
-  motivo String       @map("motivo_adocao") @db.Text
-
-  usuarios UsuarioHasPedidosAdocao[]
-  animais  PedidosAdocaoHasAnimal[]
-
-  @@map("pedidos_adocao")
-}
-
-model UsuarioHasPedidosAdocao {
-  usuarioIdusuarios Int @map("usuario_idusuarios")
-  pedidosAdocaoIds  Int @map("pedidos_adocao_ids")
-
-  usuario      Usuario       @relation(fields: [usuarioIdusuarios], references: [idusuarios])
-  pedidoAdocao PedidosAdocao @relation(fields: [pedidosAdocaoIds], references: [ids])
-
-  @@id([usuarioIdusuarios, pedidosAdocaoIds])
-  @@map("usuario_has_pedidos_adocao")
-}
-
-model PedidosAdocaoHasAnimal {
-  pedidosAdocaoIds Int @map("pedidos_adocao_ids")
-  animalIdAnimal   Int @map("animal_id_animal")
-
-  pedidoAdocao PedidosAdocao @relation(fields: [pedidosAdocaoIds], references: [ids])
-  animal       Animal        @relation(fields: [animalIdAnimal], references: [idAnimal])
-
-  @@id([pedidosAdocaoIds, animalIdAnimal])
-  @@map("pedidos_adocao_has_animal")
-}
-
 model Animal {
-  idAnimal  Int        @id @default(autoincrement()) @map("id_animal")
-  nome      String     @map("nome_animal") @db.VarChar(45)
-  sexo      SexoAnimal @map("sexo_animal")
-  castrado  Boolean
-  vacinado  Boolean
-  descricao String     @db.Text
+  id             Int          @id @default(autoincrement()) @map("id_animal")
+  usuarioId      Int          @map("id_usuario")
+  nome           String       @map("nome_animal") @db.VarChar(100)
+  sexo           Sexo         @map("sexo_animal")
+  dataNascimento DateTime?    @map("data_nascimento") @db.Date
+  castrado       Boolean      @default(false)
+  vacinado       Boolean      @default(false)
+  descricao      String?      @db.Text
+  status         StatusAnimal @default(DISPONIVEL) @map("status_animal")
+  criadoEm       DateTime     @default(now()) @map("criado_em")
+  atualizadoEm   DateTime     @updatedAt @map("atualizado_em")
 
-  gato     Gato?
+  dono     Usuario        @relation(fields: [usuarioId], references: [id])
   cachorro Cachorro?
-  pedidos  PedidosAdocaoHasAnimal[]
+  gato     Gato?
+  pedidos  PedidoAdocao[]
 
+  @@index([status])
   @@map("animal")
 }
 
-model Gato {
-  animalIdAnimal  Int    @id @map("animal_id_animal")
-  testadoFivFelv  Int    @map("testado_fiv_felv")
-  conviveComGatos String @map("convive_com_gatos") @db.VarChar(45)
+model Cachorro {
+  animalId            Int     @id @map("id_animal")
+  porte               Porte   @map("porte_cachorro")
+  conviveComCachorros Boolean @default(false) @map("convive_com_cachorros")
 
-  animal Animal @relation(fields: [animalIdAnimal], references: [idAnimal], onDelete: Cascade)
+  animal Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  @@map("cachorro")
+}
+
+model Gato {
+  animalId        Int     @id @map("id_animal")
+  testadoFivFelv  Boolean @default(false) @map("testado_fiv_felv")
+  conviveComGatos Boolean @default(false) @map("convive_com_gatos")
+
+  animal Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
 
   @@map("gato")
 }
 
-model Cachorro {
-  animalIdAnimal      Int           @id @map("animal_id_animal")
-  porte               PorteCachorro @map("porte_cachorro")
-  conviveComCachorros Boolean       @map("convive_com_cachorros")
+model PedidoAdocao {
+  id           Int          @id @default(autoincrement()) @map("id_pedido")
+  usuarioId    Int          @map("id_usuario")
+  animalId     Int          @map("id_animal")
+  status       StatusPedido @default(PENDENTE) @map("status_pedido")
+  motivo       String       @map("motivo_adocao") @db.Text
+  criadoEm     DateTime     @default(now()) @map("criado_em")
+  atualizadoEm DateTime     @updatedAt @map("atualizado_em")
 
-  animal Animal @relation(fields: [animalIdAnimal], references: [idAnimal], onDelete: Cascade)
+  adotante Usuario @relation(fields: [usuarioId], references: [id])
+  animal   Animal  @relation(fields: [animalId], references: [id], onDelete: Cascade)
 
-  @@map("cachorro")
+  @@index([animalId, status])
+  @@map("pedido_adocao")
 }
