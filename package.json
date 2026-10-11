@@ -1,26 +1,29 @@
 {
-  "name": "projetocomp",
+  "name": "trilha-backend-compjr",
   "version": "1.0.0",
-  "description": "",
-  "homepage": "https://github.com/IsadoraRB-dge/Trilha-Backend-CompJr#readme",
-  "bugs": {
-    "url": "https://github.com/IsadoraRB-dge/Trilha-Backend-CompJr/issues"
+  "description": "API de gerenciamento de adoção de cães e gatos - Desafio Back-end Comp Júnior 2026/2",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/IsadoraRB-dge/Trilha-Backend-CompJr.git"
   },
   "license": "ISC",
-  "author": "",
-  "type": "commonjs",
-  "main": "src/index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0"
   },
   "devDependencies": {
-    "prisma": "^6.19.3"
-  },
-  "dependencies": {
-    "@prisma/client": "^6.19.3"
+    "nodemon": "^3.1.9",
+    "prisma": "6.19.3"
   }
 }
