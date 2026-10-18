@@ -12,6 +12,7 @@ Projeto desenvolvido para o Desafio Back-end 2026/2 da Comp Júnior.
 - [DER](#der)
 - [Regras de negócio](#regras-de-negócio)
 - [Perfis e permissões](#perfis-e-permissões)
+- [Autenticação e segurança](#autenticação-e-segurança)
 - [Integração externa](#integração-externa)
 - [Arquitetura](#arquitetura)
 - [Configuração e execução](#configuração-e-execução)
@@ -34,6 +35,9 @@ Usuários cadastram animais disponíveis para adoção. Outros usuários fazem p
 - Express 5
 - PostgreSQL 17
 - Prisma ORM 6
+- JWT (`jsonwebtoken`) e `bcryptjs` para autenticação
+- Zod para validação dos dados
+- Nodemailer e Mailpit para envio de e-mails
 - Docker e Docker Compose
 
 ## Entidades
@@ -45,6 +49,8 @@ Usuários cadastram animais disponíveis para adoção. Outros usuários fazem p
 | **Cachorro** | Dados exclusivos de cães: porte e convivência com outros cães. |
 | **Gato** | Dados exclusivos de gatos: teste de FIV/FeLV e convivência com outros gatos. |
 | **Pedido de Adoção** | Solicitação de um usuário para adotar um animal, com motivo e status. |
+
+A tabela `token_recuperacao_senha` é de apoio à recuperação de senha e não é uma entidade de negócio.
 
 **Decisões de modelagem**
 
@@ -58,6 +64,7 @@ Usuários cadastram animais disponíveis para adoção. Outros usuários fazem p
 erDiagram
     usuario ||--o{ animal : cadastra
     usuario ||--o{ pedido_adocao : solicita
+    usuario ||--o{ token_recuperacao_senha : recupera
     animal ||--o{ pedido_adocao : recebe
     animal ||--o| cachorro : especializa
     animal ||--o| gato : especializa
@@ -73,8 +80,17 @@ erDiagram
         varchar bairro_usuario
         varchar cidade_usuario
         char uf_usuario
+        timestamp senha_alterada_em
         timestamp criado_em
         timestamp atualizado_em
+    }
+    token_recuperacao_senha {
+        int id_token PK
+        int id_usuario FK
+        char token_hash UK
+        timestamp expira_em
+        timestamp usado_em
+        timestamp criado_em
     }
     animal {
         int id_animal PK
@@ -115,9 +131,11 @@ O schema correspondente está em `prisma/schema.prisma`.
 ## Regras de negócio
 
 ### Usuários
-- O e-mail é único. E-mail já cadastrado retorna `409`.
-- A senha é armazenada apenas como hash e nunca é retornada nas respostas.
-- O CEP deve ter 8 dígitos (formato inválido retorna `400`). Logradouro, bairro, cidade e UF são preenchidos pelo ViaCEP; CEP inexistente retorna `422`, e ViaCEP indisponível retorna `503` sem salvar dados.
+- O e-mail é único (sem diferenciar maiúsculas e minúsculas). E-mail já cadastrado retorna `409`.
+- A senha deve ter entre 8 e 72 caracteres, é armazenada apenas como hash (bcrypt) e nunca é retornada nas respostas.
+- O cadastro público cria sempre um usuário `COMUM`. Um campo `perfil` enviado no corpo é ignorado.
+- O CEP deve ter 8 dígitos, com ou sem hífen (formato inválido retorna `400`). Logradouro, bairro, cidade e UF são preenchidos pelo ViaCEP; CEP inexistente retorna `422`, e ViaCEP indisponível retorna `503` sem salvar dados.
+- Um administrador inicial é criado automaticamente ao iniciar a API, com os dados de `ADMIN_EMAIL` e `ADMIN_PASSWORD`, se ainda não existir.
 
 ### Animais
 - Todo animal é cadastrado como cachorro ou como gato, com os dados específicos da espécie. O animal e seus dados específicos são criados na mesma transação.
@@ -137,8 +155,8 @@ O schema correspondente está em `prisma/schema.prisma`.
 
 | Recurso | Ação | Usuário Comum | Administrador |
 |---|---|---|---|
-| Usuário | Ver e editar o próprio perfil | ✅ | ✅ |
-| Usuário | Listar e excluir outros usuários | ❌ | ✅ |
+| Usuário | Ver o próprio perfil | ✅ | ✅ |
+| Usuário | Listar todos os usuários | ❌ | ✅ |
 | Animal | Cadastrar | ✅ | ✅ |
 | Animal | Listar e visualizar | ✅ | ✅ |
 | Animal | Editar e excluir | Somente os próprios | ✅ |
@@ -146,26 +164,46 @@ O schema correspondente está em `prisma/schema.prisma`.
 | Pedido | Aprovar e recusar | Somente pedidos dos próprios animais | ✅ |
 | Pedido | Cancelar | Somente os próprios, se pendentes | ✅ |
 
+## Autenticação e segurança
+
+- **Login com JWT:** `POST /auth/login` devolve um token que deve ser enviado nas rotas protegidas no cabeçalho `Authorization: Bearer <token>`. O token expira conforme `JWT_EXPIRES_IN` (padrão: 1 hora).
+- **Sem token, ou com token inválido ou expirado:** `401`. **Perfil sem permissão:** `403`.
+- **Mensagem única no login:** e-mail inexistente e senha errada retornam a mesma mensagem, para não revelar quais e-mails estão cadastrados.
+- **Recuperação de senha:**
+  - `POST /auth/forgot-password` sempre responde a mesma mensagem, exista o e-mail ou não.
+  - O código enviado por e-mail é aleatório (256 bits), vale por `RESET_TOKEN_EXPIRES_MINUTES` minutos (padrão: 15) e pode ser usado uma única vez.
+  - No banco fica guardado apenas o hash SHA-256 do código, nunca o código em si.
+  - Pedir um novo código invalida os anteriores.
+  - Ao redefinir a senha, todos os tokens JWT emitidos antes da troca deixam de valer.
+- **Erros:** respostas de erro nunca expõem detalhes internos. Erros inesperados retornam `500` com mensagem genérica.
+
 ## Integração externa
 
-**ViaCEP** (https://viacep.com.br): no cadastro e na edição de usuários, a API preenche logradouro, bairro, cidade e UF a partir do CEP. Isso padroniza o endereço e permite filtrar animais por cidade e estado do dono. A API é gratuita e não exige chave.
+**ViaCEP** (https://viacep.com.br): no cadastro de usuários, a API preenche logradouro, bairro, cidade e UF a partir do CEP. Isso padroniza o endereço e permite filtrar animais por cidade e estado do dono. A API é gratuita e não exige chave.
 
 ## Arquitetura
 
-O projeto segue princípios de Clean Architecture, com as dependências apontando para dentro (as regras de negócio não dependem de Express nem de Prisma):
+O projeto segue princípios de Clean Architecture. As regras de negócio (casos de uso) não importam Express, Prisma, bcrypt, JWT nem Nodemailer: recebem pelo construtor objetos com os métodos de que precisam. O único lugar que conhece as implementações concretas é o `src/container.js`.
 
 ```
 src/
-├── domain/             # Regras e conceitos do negócio, sem dependências externas
-│   └── errors/         # Erros de aplicação (AppError)
+├── config/
+│   └── env.js            # Leitura das variáveis de ambiente
+├── domain/
+│   └── errors/           # Erros de aplicação (AppError)
 ├── application/
-│   └── use-cases/      # Casos de uso (orquestram as regras de negócio)
-├── infra/
-│   └── database/       # Acesso ao banco com Prisma
+│   ├── use-cases/        # Regras de negócio (registrar, logar, recuperar senha...)
+│   └── utils/
+├── infra/                # Implementações técnicas
+│   ├── database/         # Prisma e repositórios
+│   ├── security/         # bcrypt, JWT e geração de código de recuperação
+│   ├── mail/             # Envio de e-mail (Nodemailer)
+│   └── cep/              # Integração com o ViaCEP
 ├── interfaces/
-│   └── http/           # Rotas e middlewares do Express
-├── app.js              # Montagem da aplicação Express
-└── server.js           # Inicialização do servidor
+│   └── http/             # Rotas, controllers, validações e middlewares do Express
+├── container.js          # Monta as dependências e liga as camadas
+├── app.js                # Montagem da aplicação Express
+└── server.js             # Inicialização do servidor
 ```
 
 Todos os erros passam por um middleware global (`interfaces/http/middlewares/errorHandler.js`), que devolve respostas no formato `{ "error": { "message": "..." } }` e nunca expõe detalhes internos.
@@ -192,12 +230,35 @@ Todos os erros passam por um middleware global (`interfaces/http/middlewares/err
 ```bash
    docker-compose up --build
 ```
-   O banco é iniciado, as migrations são aplicadas automaticamente e a API fica disponível em `http://localhost:3000`.
+   Sobem três serviços: o banco (PostgreSQL), o Mailpit (servidor de e-mail de testes) e a API. As migrations são aplicadas e o administrador inicial é criado automaticamente.
 4. Verifique se está tudo funcionando:
 ```bash
    curl http://localhost:3000/health
 ```
    Resposta esperada: `{"status":"ok","database":"ok"}`
+
+### Serviços disponíveis
+
+| Serviço | Endereço |
+|---|---|
+| API | `http://localhost:3000` |
+| Caixa de e-mails (Mailpit) | `http://localhost:8025` |
+
+### Administrador inicial
+
+| E-mail | Senha |
+|---|---|
+| `admin@adocao.local` | `Admin@12345` |
+
+Esses valores vêm de `ADMIN_EMAIL` e `ADMIN_PASSWORD` no `.env` e servem apenas para o ambiente local.
+
+### Testar a recuperação de senha
+
+1. Envie `POST /auth/forgot-password` com o e-mail de um usuário cadastrado.
+2. Abra `http://localhost:8025`. O e-mail "Recuperação de senha" aparece na caixa de entrada com o código.
+3. Envie `POST /auth/reset-password` com o código e a nova senha.
+
+Nenhum e-mail real é enviado: o Mailpit captura todas as mensagens localmente.
 
 ### Variáveis de ambiente
 
@@ -209,12 +270,20 @@ Todos os erros passam por um middleware global (`interfaces/http/middlewares/err
 | `POSTGRES_PORT` | Porta do PostgreSQL no seu computador | `5433` |
 | `API_PORT` | Porta da API no seu computador | `3000` |
 | `DATABASE_URL` | URL do banco usada pelo Prisma fora do Docker | ver `.env.example` |
+| `JWT_SECRET` | Chave de assinatura dos tokens JWT | valor de desenvolvimento |
+| `JWT_EXPIRES_IN` | Validade do token JWT | `1h` |
+| `RESET_TOKEN_EXPIRES_MINUTES` | Validade do código de recuperação, em minutos | `15` |
+| `SMTP_HOST` / `SMTP_PORT` | Servidor de e-mail usado fora do Docker | `localhost` / `1025` |
+| `MAIL_FROM` | Remetente dos e-mails | `Adoção de Animais <nao-responda@adocao.local>` |
+| `MAILPIT_UI_PORT` | Porta da caixa de e-mails no seu computador | `8025` |
+| `MAILPIT_SMTP_PORT` | Porta SMTP do Mailpit no seu computador | `1025` |
+| `ADMIN_NAME` / `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Dados do administrador inicial | ver `.env.example` |
 
-Se alguma das portas já estiver em uso no seu computador, altere `POSTGRES_PORT` ou `API_PORT` no `.env`.
+Se alguma das portas já estiver em uso no seu computador, altere a variável correspondente no `.env`.
 
 ### Desenvolvimento sem Docker para a API (opcional)
 
-Com o banco rodando pelo Docker (`docker-compose up -d db`):
+Com o banco e o Mailpit rodando pelo Docker (`docker-compose up -d db mailpit`):
 ```bash
 npm install
 npx prisma migrate dev
@@ -223,21 +292,138 @@ npm run dev
 
 ## Endpoints
 
+Formato de erro em todas as rotas:
+```json
+{ "error": { "message": "Descrição do erro" } }
+```
+Erros de validação (`400`) trazem também `details`, com o campo e a mensagem de cada problema.
+
+### Resumo
+
 | Método | Caminho | Descrição | Acesso |
 |---|---|---|---|
 | GET | `/health` | Verifica se a API e o banco estão no ar | Público |
+| POST | `/auth/register` | Cadastra um usuário comum | Público |
+| POST | `/auth/login` | Autentica e devolve o token JWT | Público |
+| GET | `/auth/me` | Dados do usuário autenticado | Autenticado |
+| POST | `/auth/forgot-password` | Envia o código de recuperação por e-mail | Público |
+| POST | `/auth/reset-password` | Redefine a senha com o código recebido | Público |
+| GET | `/usuarios` | Lista todos os usuários | Administrador |
 
-**Exemplo de resposta (`200`):**
+### GET `/health`
+
+**Resposta `200`:**
 ```json
 { "status": "ok", "database": "ok" }
 ```
+**`503`:** banco indisponível.
 
-**Banco indisponível (`503`):**
+### POST `/auth/register`
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `nome` | texto | Sim | 2 a 100 caracteres |
+| `email` | texto | Sim | E-mail válido, até 150 caracteres |
+| `senha` | texto | Sim | 8 a 72 caracteres |
+| `cep` | texto | Sim | 8 dígitos, com ou sem hífen |
+
+**Requisição:**
 ```json
-{ "error": { "message": "Banco de dados indisponível" } }
+{
+  "nome": "Isadora Rocha Brito",
+  "email": "Isa@email.com",
+  "senha": "senhaSegura123",
+  "cep": "01001-000"
+}
 ```
+**Resposta `201`:**
+```json
+{
+  "id": 2,
+  "nome": "Isadora Rocha Brito",
+  "email": "Isa@email.com",
+  "perfil": "COMUM",
+  "cep": "01001000",
+  "logradouro": "Praça da Sé",
+  "bairro": "Sé",
+  "cidade": "São Paulo",
+  "uf": "SP",
+  "criadoEm": "2026-10-18T12:00:00.000Z",
+  "atualizadoEm": "2026-10-18T12:00:00.000Z"
+}
+```
+**Erros:** `400` dados inválidos · `409` e-mail já cadastrado · `422` CEP não encontrado · `503` ViaCEP indisponível.
 
-Os demais endpoints serão documentados conforme forem implementados.
+### POST `/auth/login`
+
+| Campo | Tipo | Obrigatório |
+|---|---|---|
+| `email` | texto | Sim |
+| `senha` | texto | Sim |
+
+**Requisição:**
+```json
+{ "email": "Isa@email.com", "senha": "senhaSegura123" }
+```
+**Resposta `200`:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "usuario": { "id": 2, "nome": "Isadora Rocha Brito", "email": "Isa@email.com", "perfil": "COMUM" }
+}
+```
+O objeto `usuario` traz os mesmos campos da resposta do cadastro.
+
+**Erros:** `400` dados inválidos · `401` e-mail ou senha inválidos.
+
+### GET `/auth/me`
+
+**Cabeçalho:** `Authorization: Bearer <token>`
+
+**Resposta `200`:** os dados do usuário autenticado, no mesmo formato da resposta do cadastro.
+
+**Erros:** `401` token ausente, inválido, expirado ou emitido antes de uma troca de senha.
+
+### POST `/auth/forgot-password`
+
+| Campo | Tipo | Obrigatório |
+|---|---|---|
+| `email` | texto | Sim |
+
+**Requisição:**
+```json
+{ "email": "Isa@email.com" }
+```
+**Resposta `200` (sempre a mesma, exista o e-mail ou não):**
+```json
+{ "message": "Se o e-mail estiver cadastrado, você receberá as instruções para redefinir a senha." }
+```
+**Erros:** `400` dados inválidos.
+
+### POST `/auth/reset-password`
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `token` | texto | Sim | Código recebido por e-mail |
+| `novaSenha` | texto | Sim | 8 a 72 caracteres |
+
+**Requisição:**
+```json
+{ "token": "código-recebido-por-email", "novaSenha": "novaSenha456" }
+```
+**Resposta `200`:**
+```json
+{ "message": "Senha redefinida com sucesso. Faça login com a nova senha." }
+```
+**Erros:** `400` dados inválidos, ou código inválido, expirado ou já utilizado.
+
+### GET `/usuarios`
+
+**Cabeçalho:** `Authorization: Bearer <token de administrador>`
+
+**Resposta `200`:** lista de usuários, cada um no mesmo formato da resposta do cadastro.
+
+**Erros:** `401` não autenticado · `403` usuário sem perfil de administrador.
 
 ## Collection
 
