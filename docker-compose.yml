@@ -17,6 +17,15 @@ services:
       timeout: 5s
       retries: 10
 
+  mailpit:
+    image: axllent/mailpit:v1.31.4
+    container_name: adocao-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+
+
   api:
     build: .
     container_name: adocao-api
@@ -24,10 +33,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
       NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-adocao_dev}@db:5432/${POSTGRES_DB:-adocao}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-troque_esta_chave_em_producao}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+      RESET_TOKEN_EXPIRES_MINUTES: ${RESET_TOKEN_EXPIRES_MINUTES:-15}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      MAIL_FROM: ${MAIL_FROM:-Adoção de Animais <nao-responda@adocao.local>}
+      ADMIN_NAME: ${ADMIN_NAME:-Administrador}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@adocao.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@12345}  
     ports:
       - "${API_PORT:-3000}:3000"
 
