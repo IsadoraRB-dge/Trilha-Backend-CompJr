@@ -138,31 +138,46 @@ O schema correspondente está em `prisma/schema.prisma`.
 - Um administrador inicial é criado automaticamente ao iniciar a API, com os dados de `ADMIN_EMAIL` e `ADMIN_PASSWORD`, se ainda não existir.
 
 ### Animais
-- Todo animal é cadastrado como cachorro ou como gato, com os dados específicos da espécie. O animal e seus dados específicos são criados na mesma transação.
-- Só o dono do animal ou um administrador pode editá-lo ou excluí-lo.
-- Animal com status `ADOTADO` não pode ser excluído, para preservar o histórico.
+- Todo animal é cadastrado como cachorro ou como gato (`especie`), com os dados específicos da espécie em `cachorro` ou `gato`. O animal e seus dados específicos são criados na mesma transação.
+- A espécie não pode ser alterada depois do cadastro. Na edição, só são aceitos os dados específicos da espécie do animal (`400` caso contrário).
+- O animal é cadastrado com status `DISPONIVEL`. O status não é editado diretamente: ele muda conforme os pedidos de adoção.
+- A data de nascimento é opcional, no formato `AAAA-MM-DD`, e não pode estar no futuro.
+- Qualquer pessoa, mesmo sem login, pode listar e ver os animais, com filtros por espécie, status, sexo, porte, cidade e UF do dono.
+- Só o dono do animal ou um administrador pode editá-lo ou excluí-lo (`403` caso contrário).
+- Animal com status `ADOTADO` não pode ser editado nem excluído (`409`), para preservar o histórico.
+- Ao excluir um animal ainda não adotado, os pedidos dele são excluídos junto.
 
 ### Pedidos de adoção
-- O usuário não pode pedir para adotar o próprio animal.
-- Só é possível pedir animais com status `DISPONIVEL` ou `EM_PROCESSO`, e cada usuário pode ter apenas um pedido ativo por animal.
+- O usuário não pode pedir para adotar o próprio animal (`403`).
+- Não é possível pedir um animal com status `ADOTADO` (`409`).
+- Cada usuário pode ter apenas um pedido pendente por animal (`409`).
+- O motivo é obrigatório, com 10 a 1000 caracteres.
 - O primeiro pedido muda o animal para `EM_PROCESSO`.
-- Só o dono do animal (ou um administrador) aprova ou recusa. Ao aprovar, o animal vira `ADOTADO` e os demais pedidos pendentes dele são recusados automaticamente.
-- O adotante pode cancelar o próprio pedido enquanto estiver `PENDENTE`.
-- `APROVADO`, `RECUSADO` e `CANCELADO` são status finais.
-- Não existe exclusão de pedidos: eles são cancelados, para manter o histórico.
+- Só o adotante pode alterar o motivo do próprio pedido, e só enquanto ele estiver `PENDENTE`.
+- Só o dono do animal (ou um administrador) aprova ou recusa. Ao aprovar, o pedido vira `APROVADO`, o animal vira `ADOTADO` e os demais pedidos pendentes do animal são recusados automaticamente, tudo numa única transação.
+- O adotante (ou um administrador) pode cancelar o pedido enquanto ele estiver `PENDENTE`.
+- Quando um pedido é recusado ou cancelado e o animal não tem mais pedidos pendentes, o animal volta para `DISPONIVEL`.
+- `APROVADO`, `RECUSADO` e `CANCELADO` são status finais (`409` ao tentar mudá-los).
+- Um pedido só pode ser visto pelo adotante, pelo dono do animal ou por um administrador.
+- **Não existe exclusão de pedidos:** eles são cancelados ou recusados, para manter o histórico do processo de adoção.
 
 ## Perfis e permissões
 
-| Recurso | Ação | Usuário Comum | Administrador |
-|---|---|---|---|
-| Usuário | Ver o próprio perfil | ✅ | ✅ |
-| Usuário | Listar todos os usuários | ❌ | ✅ |
-| Animal | Cadastrar | ✅ | ✅ |
-| Animal | Listar e visualizar | ✅ | ✅ |
-| Animal | Editar e excluir | Somente os próprios | ✅ |
-| Pedido | Criar | ✅ (exceto para animal próprio) | ✅ |
-| Pedido | Aprovar e recusar | Somente pedidos dos próprios animais | ✅ |
-| Pedido | Cancelar | Somente os próprios, se pendentes | ✅ |
+| Recurso | Ação | Visitante (sem login) | Usuário Comum | Administrador |
+|---|---|---|---|---|
+| Usuário | Ver o próprio perfil | ❌ | ✅ | ✅ |
+| Usuário | Listar todos os usuários | ❌ | ❌ | ✅ |
+| Animal | Listar e visualizar | ✅ | ✅ | ✅ |
+| Animal | Cadastrar | ❌ | ✅ | ✅ |
+| Animal | Editar e excluir | ❌ | Somente os próprios | ✅ |
+| Pedido | Criar | ❌ | ✅ (exceto para animal próprio) | ✅ |
+| Pedido | Listar os próprios pedidos | ❌ | ✅ | ✅ |
+| Pedido | Listar os pedidos de um animal | ❌ | Somente dos próprios animais | ✅ |
+| Pedido | Listar todos os pedidos | ❌ | ❌ | ✅ |
+| Pedido | Ver um pedido | ❌ | Se for o adotante ou o dono do animal | ✅ |
+| Pedido | Alterar o motivo | ❌ | Somente os próprios, se pendentes | ❌ |
+| Pedido | Aprovar e recusar | ❌ | Somente pedidos dos próprios animais | ✅ |
+| Pedido | Cancelar | ❌ | Somente os próprios, se pendentes | ✅ |
 
 ## Autenticação e segurança
 
@@ -190,9 +205,15 @@ src/
 ├── config/
 │   └── env.js            # Leitura das variáveis de ambiente
 ├── domain/
-│   └── errors/           # Erros de aplicação (AppError)
+│   ├── constants.js      # Perfis, espécies e status do negócio
+│   ├── errors/           # Erros de aplicação (AppError)
+│   └── policies/         # Regras de permissão (dono, adotante, admin)
 ├── application/
-│   ├── use-cases/        # Regras de negócio (registrar, logar, recuperar senha...)
+│   ├── use-cases/        # Regras de negócio
+│   │   ├── auth/         # Cadastro, login e recuperação de senha
+│   │   ├── usuarios/
+│   │   ├── animais/      # CRUD de animais
+│   │   └── pedidos/      # Pedidos de adoção
 │   └── utils/
 ├── infra/                # Implementações técnicas
 │   ├── database/         # Prisma e repositórios
@@ -217,24 +238,24 @@ Todos os erros passam por um middleware global (`interfaces/http/middlewares/err
 ### Passos
 
 1. Clone o repositório:
-```bash
+   ```bash
    git clone https://github.com/IsadoraRB-dge/Trilha-Backend-CompJr.git
    cd Trilha-Backend-CompJr
-```
+   ```
 2. Crie o arquivo `.env` a partir do exemplo. Os valores padrão já funcionam para rodar localmente:
-```bash
+   ```bash
    cp .env.example .env
-```
+   ```
    No Windows (PowerShell): `Copy-Item .env.example .env`
 3. Suba o ambiente:
-```bash
+   ```bash
    docker-compose up --build
-```
+   ```
    Sobem três serviços: o banco (PostgreSQL), o Mailpit (servidor de e-mail de testes) e a API. As migrations são aplicadas e o administrador inicial é criado automaticamente.
 4. Verifique se está tudo funcionando:
-```bash
+   ```bash
    curl http://localhost:3000/health
-```
+   ```
    Resposta esperada: `{"status":"ok","database":"ok"}`
 
 ### Serviços disponíveis
@@ -309,6 +330,30 @@ Erros de validação (`400`) trazem também `details`, com o campo e a mensagem 
 | POST | `/auth/forgot-password` | Envia o código de recuperação por e-mail | Público |
 | POST | `/auth/reset-password` | Redefine a senha com o código recebido | Público |
 | GET | `/usuarios` | Lista todos os usuários | Administrador |
+| GET | `/animais` | Lista animais, com filtros e paginação | Público |
+| GET | `/animais/:id` | Detalhes de um animal | Público |
+| POST | `/animais` | Cadastra um animal | Autenticado |
+| PATCH | `/animais/:id` | Altera um animal | Dono ou administrador |
+| DELETE | `/animais/:id` | Exclui um animal | Dono ou administrador |
+| POST | `/animais/:id/pedidos` | Faz um pedido de adoção | Autenticado (exceto o dono) |
+| GET | `/animais/:id/pedidos` | Lista os pedidos recebidos por um animal | Dono ou administrador |
+| GET | `/pedidos/meus` | Lista os pedidos feitos pelo usuário | Autenticado |
+| GET | `/pedidos` | Lista todos os pedidos | Administrador |
+| GET | `/pedidos/:id` | Detalhes de um pedido | Adotante, dono do animal ou administrador |
+| PATCH | `/pedidos/:id` | Altera o motivo do pedido | Adotante |
+| PATCH | `/pedidos/:id/aprovar` | Aprova o pedido | Dono ou administrador |
+| PATCH | `/pedidos/:id/recusar` | Recusa o pedido | Dono ou administrador |
+| PATCH | `/pedidos/:id/cancelar` | Cancela o pedido | Adotante ou administrador |
+
+Rotas marcadas como autenticadas exigem o cabeçalho `Authorization: Bearer <token>`.
+
+**Paginação:** as listagens aceitam `pagina` (padrão `1`) e `limite` (padrão `10`, máximo `50`) na query string e respondem no formato:
+```json
+{
+  "dados": [],
+  "paginacao": { "pagina": 1, "limite": 10, "total": 0, "totalPaginas": 0 }
+}
+```
 
 ### GET `/health`
 
@@ -330,8 +375,8 @@ Erros de validação (`400`) trazem também `details`, com o campo e a mensagem 
 **Requisição:**
 ```json
 {
-  "nome": "Isadora Rocha Brito",
-  "email": "Isa@email.com",
+  "nome": "Maria Silva",
+  "email": "maria@email.com",
   "senha": "senhaSegura123",
   "cep": "01001-000"
 }
@@ -340,8 +385,8 @@ Erros de validação (`400`) trazem também `details`, com o campo e a mensagem 
 ```json
 {
   "id": 2,
-  "nome": "Isadora Rocha Brito",
-  "email": "Isa@email.com",
+  "nome": "Maria Silva",
+  "email": "maria@email.com",
   "perfil": "COMUM",
   "cep": "01001000",
   "logradouro": "Praça da Sé",
@@ -363,13 +408,13 @@ Erros de validação (`400`) trazem também `details`, com o campo e a mensagem 
 
 **Requisição:**
 ```json
-{ "email": "Isa@email.com", "senha": "senhaSegura123" }
+{ "email": "maria@email.com", "senha": "senhaSegura123" }
 ```
 **Resposta `200`:**
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "usuario": { "id": 2, "nome": "Isadora Rocha Brito", "email": "Isa@email.com", "perfil": "COMUM" }
+  "usuario": { "id": 2, "nome": "Maria Silva", "email": "maria@email.com", "perfil": "COMUM" }
 }
 ```
 O objeto `usuario` traz os mesmos campos da resposta do cadastro.
@@ -392,7 +437,7 @@ O objeto `usuario` traz os mesmos campos da resposta do cadastro.
 
 **Requisição:**
 ```json
-{ "email": "Isa@email.com" }
+{ "email": "maria@email.com" }
 ```
 **Resposta `200` (sempre a mesma, exista o e-mail ou não):**
 ```json
@@ -424,6 +469,222 @@ O objeto `usuario` traz os mesmos campos da resposta do cadastro.
 **Resposta `200`:** lista de usuários, cada um no mesmo formato da resposta do cadastro.
 
 **Erros:** `401` não autenticado · `403` usuário sem perfil de administrador.
+
+### GET `/animais`
+
+Público. Filtros opcionais na query string:
+
+| Parâmetro | Valores |
+|---|---|
+| `especie` | `CACHORRO` ou `GATO` |
+| `status` | `DISPONIVEL`, `EM_PROCESSO` ou `ADOTADO` |
+| `sexo` | `M` ou `F` |
+| `porte` | `PEQUENO`, `MEDIO` ou `GRANDE` (só cachorros) |
+| `cidade` | Cidade do dono (sem diferenciar maiúsculas e minúsculas) |
+| `uf` | UF do dono, com 2 letras |
+| `pagina`, `limite` | Paginação |
+
+**Exemplo:** `GET /animais?especie=CACHORRO&porte=GRANDE&uf=SP`
+
+**Resposta `200`:** lista paginada de animais, no formato da resposta de `GET /animais/:id`.
+
+**Erros:** `400` filtro inválido.
+
+### GET `/animais/:id`
+
+Público.
+
+**Resposta `200`:**
+```json
+{
+  "id": 1,
+  "nome": "Rex",
+  "sexo": "M",
+  "dataNascimento": "2023-05-10T00:00:00.000Z",
+  "castrado": true,
+  "vacinado": true,
+  "descricao": "Dócil e brincalhão",
+  "status": "DISPONIVEL",
+  "criadoEm": "2026-10-25T12:00:00.000Z",
+  "atualizadoEm": "2026-10-25T12:00:00.000Z",
+  "dono": { "id": 2, "nome": "Maria Silva", "cidade": "São Paulo", "uf": "SP" },
+  "especie": "CACHORRO",
+  "cachorro": { "porte": "GRANDE", "conviveComCachorros": true }
+}
+```
+Para gatos, `especie` é `GATO` e, no lugar de `cachorro`, vem `"gato": { "testadoFivFelv": true, "conviveComGatos": false }`.
+
+**Erros:** `400` ID inválido · `404` animal não encontrado.
+
+### POST `/animais`
+
+**Cabeçalho:** `Authorization: Bearer <token>`
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `nome` | texto | Sim | 2 a 100 caracteres |
+| `sexo` | texto | Sim | `M` ou `F` |
+| `especie` | texto | Sim | `CACHORRO` ou `GATO` |
+| `cachorro` | objeto | Se `especie` for `CACHORRO` | `porte` (obrigatório: `PEQUENO`, `MEDIO` ou `GRANDE`) e `conviveComCachorros` (opcional, padrão `false`) |
+| `gato` | objeto | Se `especie` for `GATO` | `testadoFivFelv` e `conviveComGatos` (opcionais, padrão `false`) |
+| `dataNascimento` | texto | Não | `AAAA-MM-DD`, não pode estar no futuro |
+| `castrado` | booleano | Não | Padrão `false` |
+| `vacinado` | booleano | Não | Padrão `false` |
+| `descricao` | texto | Não | Até 1000 caracteres |
+
+**Requisição (cachorro):**
+```json
+{
+  "nome": "Rex",
+  "sexo": "M",
+  "especie": "CACHORRO",
+  "dataNascimento": "2023-05-10",
+  "castrado": true,
+  "vacinado": true,
+  "descricao": "Dócil e brincalhão",
+  "cachorro": { "porte": "GRANDE", "conviveComCachorros": true }
+}
+```
+**Requisição (gato):**
+```json
+{
+  "nome": "Mia",
+  "sexo": "F",
+  "especie": "GATO",
+  "gato": { "testadoFivFelv": true, "conviveComGatos": false }
+}
+```
+**Resposta `201`:** o animal criado, no formato da resposta de `GET /animais/:id`.
+
+**Erros:** `400` dados inválidos · `401` não autenticado.
+
+### PATCH `/animais/:id`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (dono do animal ou administrador)
+
+Envie só os campos que quer alterar (pelo menos um). Os campos são os mesmos do cadastro, exceto `especie`, que não pode ser alterada. Os dados específicos vão em `cachorro` ou `gato`, conforme a espécie do animal. `dataNascimento` e `descricao` aceitam `null` para apagar o valor.
+
+**Requisição:**
+```json
+{ "vacinado": true, "cachorro": { "porte": "MEDIO" } }
+```
+**Resposta `200`:** o animal atualizado.
+
+**Erros:** `400` dados inválidos ou dados de outra espécie · `401` não autenticado · `403` não é o dono · `404` animal não encontrado · `409` animal já adotado.
+
+### DELETE `/animais/:id`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (dono do animal ou administrador)
+
+**Resposta `204`:** sem conteúdo. Os pedidos do animal são excluídos junto.
+
+**Erros:** `401` não autenticado · `403` não é o dono · `404` animal não encontrado · `409` animal já adotado.
+
+### POST `/animais/:id/pedidos`
+
+**Cabeçalho:** `Authorization: Bearer <token>`
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `motivo` | texto | Sim | 10 a 1000 caracteres |
+
+**Requisição:**
+```json
+{ "motivo": "Tenho uma casa com quintal e tempo para cuidar dele." }
+```
+**Resposta `201`:**
+```json
+{
+  "id": 1,
+  "usuarioId": 3,
+  "animalId": 1,
+  "status": "PENDENTE",
+  "motivo": "Tenho uma casa com quintal e tempo para cuidar dele.",
+  "criadoEm": "2026-10-25T12:00:00.000Z",
+  "atualizadoEm": "2026-10-25T12:00:00.000Z",
+  "animal": { "id": 1, "nome": "Rex", "status": "EM_PROCESSO", "usuarioId": 2 },
+  "adotante": { "id": 3, "nome": "João Souza", "email": "joao@email.com", "cidade": "São Paulo", "uf": "SP" }
+}
+```
+**Erros:** `400` dados inválidos · `401` não autenticado · `403` pedido para o próprio animal · `404` animal não encontrado · `409` animal já adotado ou pedido pendente já existente.
+
+### GET `/animais/:id/pedidos`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (dono do animal ou administrador)
+
+**Query string:** `status` (opcional: `PENDENTE`, `APROVADO`, `RECUSADO` ou `CANCELADO`), `pagina` e `limite`.
+
+**Resposta `200`:** lista paginada de pedidos, no formato da resposta de `POST /animais/:id/pedidos`.
+
+**Erros:** `401` não autenticado · `403` não é o dono · `404` animal não encontrado.
+
+### GET `/pedidos/meus`
+
+**Cabeçalho:** `Authorization: Bearer <token>`
+
+**Query string:** `status`, `pagina` e `limite` (opcionais).
+
+**Resposta `200`:** lista paginada dos pedidos feitos pelo usuário autenticado.
+
+### GET `/pedidos`
+
+**Cabeçalho:** `Authorization: Bearer <token de administrador>`
+
+**Query string:** `status`, `pagina` e `limite` (opcionais).
+
+**Resposta `200`:** lista paginada de todos os pedidos.
+
+**Erros:** `401` não autenticado · `403` não é administrador.
+
+### GET `/pedidos/:id`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (adotante, dono do animal ou administrador)
+
+**Resposta `200`:** o pedido, no formato da resposta de `POST /animais/:id/pedidos`.
+
+**Erros:** `401` não autenticado · `403` sem permissão · `404` pedido não encontrado.
+
+### PATCH `/pedidos/:id`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (adotante)
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `motivo` | texto | Sim | 10 a 1000 caracteres |
+
+**Resposta `200`:** o pedido atualizado.
+
+**Erros:** `400` dados inválidos · `401` não autenticado · `403` não é o adotante · `404` pedido não encontrado · `409` pedido não está pendente.
+
+### PATCH `/pedidos/:id/aprovar`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (dono do animal ou administrador)
+
+Sem corpo. Aprova o pedido, marca o animal como `ADOTADO` e recusa os demais pedidos pendentes do animal.
+
+**Resposta `200`:** o pedido com status `APROVADO`.
+
+**Erros:** `401` não autenticado · `403` não é o dono · `404` pedido não encontrado · `409` pedido não está pendente.
+
+### PATCH `/pedidos/:id/recusar`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (dono do animal ou administrador)
+
+Sem corpo. Se o animal não tiver mais pedidos pendentes, ele volta para `DISPONIVEL`.
+
+**Resposta `200`:** o pedido com status `RECUSADO`.
+
+**Erros:** `401` não autenticado · `403` não é o dono · `404` pedido não encontrado · `409` pedido não está pendente.
+
+### PATCH `/pedidos/:id/cancelar`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (adotante ou administrador)
+
+Sem corpo. Se o animal não tiver mais pedidos pendentes, ele volta para `DISPONIVEL`.
+
+**Resposta `200`:** o pedido com status `CANCELADO`.
+
+**Erros:** `401` não autenticado · `403` não é o adotante · `404` pedido não encontrado · `409` pedido não está pendente.
 
 ## Collection
 
