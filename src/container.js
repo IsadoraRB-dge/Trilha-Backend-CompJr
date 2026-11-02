@@ -18,6 +18,12 @@ const RequestPasswordReset = require('./application/use-cases/auth/RequestPasswo
 const ResetPassword = require('./application/use-cases/auth/ResetPassword');
 const EnsureAdminUser = require('./application/use-cases/auth/EnsureAdminUser');
 const ListUsers = require('./application/use-cases/usuarios/ListUsers');
+const GetUser = require('./application/use-cases/usuarios/GetUser');
+const UpdateProfile = require('./application/use-cases/usuarios/UpdateProfile');
+const ChangePassword = require('./application/use-cases/usuarios/ChangePassword');
+const DeleteAccount = require('./application/use-cases/usuarios/DeleteAccount');
+const DeleteUser = require('./application/use-cases/usuarios/DeleteUser');
+const ChangeUserRole = require('./application/use-cases/usuarios/ChangeUserRole');
 
 const CreateAnimal = require('./application/use-cases/animais/CreateAnimal');
 const ListAnimals = require('./application/use-cases/animais/ListAnimals');
@@ -63,6 +69,12 @@ const requestPasswordReset = new RequestPasswordReset({
 const resetPassword = new ResetPassword({ passwordResetRepository, passwordHasher, resetTokenGenerator });
 const ensureAdminUser = new EnsureAdminUser({ userRepository, passwordHasher });
 const listUsers = new ListUsers({ userRepository });
+const getUser = new GetUser({ userRepository });
+const updateProfile = new UpdateProfile({ userRepository, cepService });
+const changePassword = new ChangePassword({ userRepository, passwordHasher });
+const deleteAccount = new DeleteAccount({ userRepository, passwordHasher });
+const deleteUser = new DeleteUser({ userRepository });
+const changeUserRole = new ChangeUserRole({ userRepository });
 
 const createAnimal = new CreateAnimal({ animalRepository });
 const listAnimals = new ListAnimals({ animalRepository });
@@ -86,7 +98,15 @@ const authController = new AuthController({
   resetPassword,
 });
 
-const userController = new UserController({ listUsers });
+const userController = new UserController({
+  listUsers,
+  getUser,
+  updateProfile,
+  changePassword,
+  deleteAccount,
+  deleteUser,
+  changeUserRole,
+});
 
 const animalController = new AnimalController({
 createAnimal,
