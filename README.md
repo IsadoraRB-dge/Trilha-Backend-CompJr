@@ -13,19 +13,20 @@ Projeto desenvolvido para o Desafio Back-end 2026/2 da Comp Júnior.
 - [Regras de negócio](#regras-de-negócio)
 - [Perfis e permissões](#perfis-e-permissões)
 - [Autenticação e segurança](#autenticação-e-segurança)
-- [Integração externa](#integração-externa)
+- [Integrações externas](#integrações-externas)
 - [Arquitetura](#arquitetura)
 - [Configuração e execução](#configuração-e-execução)
+- [Testes automatizados](#testes-automatizados)
+- [Collection do Postman](#collection-do-postman)
 - [Endpoints](#endpoints)
-- [Collection](#collection)
 
 ## Sobre o sistema
 
 **Categoria:** sistema de gerenciamento do processo de adoção.
 
-Usuários cadastram animais disponíveis para adoção. Outros usuários fazem pedidos de adoção, que o dono do animal aprova ou recusa. O sistema acompanha o status de cada animal e de cada pedido até a adoção ser concluída.
+Usuários cadastram animais disponíveis para adoção, com fotos. Outros usuários fazem pedidos de adoção, que o dono do animal aprova ou recusa. O sistema acompanha o status de cada animal e de cada pedido até a adoção ser concluída, avisa as pessoas por e-mail a cada etapa e guarda o histórico.
 
-**Inclui:** cadastro e autenticação de usuários, endereço preenchido pelo CEP, cadastro de cães e gatos, pedidos de adoção com aprovação e recusa, recuperação de senha por e-mail.
+**Inclui:** cadastro e autenticação de usuários, endereço preenchido pelo CEP, cadastro de cães e gatos com fotos, pedidos de adoção com aprovação, recusa e cancelamento, notificações por e-mail, recuperação de senha e administração de usuários.
 
 **Não inclui:** pagamentos, chat entre usuários, agendamento de visitas.
 
@@ -38,6 +39,9 @@ Usuários cadastram animais disponíveis para adoção. Outros usuários fazem p
 - JWT (`jsonwebtoken`) e `bcryptjs` para autenticação
 - Zod para validação dos dados
 - Nodemailer e Mailpit para envio de e-mails
+- Cloudinary e Multer para as fotos dos animais
+- Helmet e express-rate-limit para segurança
+- `node:test` para testes automatizados e GitHub Actions para integração contínua
 - Docker e Docker Compose
 
 ## Entidades
@@ -49,6 +53,7 @@ Usuários cadastram animais disponíveis para adoção. Outros usuários fazem p
 | **Cachorro** | Dados exclusivos de cães: porte e convivência com outros cães. |
 | **Gato** | Dados exclusivos de gatos: teste de FIV/FeLV e convivência com outros gatos. |
 | **Pedido de Adoção** | Solicitação de um usuário para adotar um animal, com motivo e status. |
+| **Foto do Animal** | Link de uma foto do animal, hospedada no Cloudinary. Cada animal pode ter até 5. |
 
 A tabela `token_recuperacao_senha` é de apoio à recuperação de senha e não é uma entidade de negócio.
 
@@ -68,6 +73,7 @@ erDiagram
     animal ||--o{ pedido_adocao : recebe
     animal ||--o| cachorro : especializa
     animal ||--o| gato : especializa
+    animal ||--o{ foto_animal : possui
 
     usuario {
         int id_usuario PK
@@ -124,6 +130,13 @@ erDiagram
         timestamp criado_em
         timestamp atualizado_em
     }
+    foto_animal {
+        int id_foto PK
+        int id_animal FK
+        varchar url
+        varchar public_id
+        timestamp criado_em
+    }
 ```
 
 O schema correspondente está em `prisma/schema.prisma`.
@@ -134,8 +147,14 @@ O schema correspondente está em `prisma/schema.prisma`.
 - O e-mail é único (sem diferenciar maiúsculas e minúsculas). E-mail já cadastrado retorna `409`.
 - A senha deve ter entre 8 e 72 caracteres, é armazenada apenas como hash (bcrypt) e nunca é retornada nas respostas.
 - O cadastro público cria sempre um usuário `COMUM`. Um campo `perfil` enviado no corpo é ignorado.
-- O CEP deve ter 8 dígitos, com ou sem hífen (formato inválido retorna `400`). Logradouro, bairro, cidade e UF são preenchidos pelo ViaCEP; CEP inexistente retorna `422`, e ViaCEP indisponível retorna `503` sem salvar dados.
+- O CEP deve ter 8 dígitos, com ou sem hífen (formato inválido retorna `400`). Logradouro, bairro, cidade e UF são preenchidos pelo ViaCEP, no cadastro e na edição do perfil; CEP inexistente retorna `422`, e ViaCEP indisponível retorna `503` sem salvar dados.
 - Um administrador inicial é criado automaticamente ao iniciar a API, com os dados de `ADMIN_EMAIL` e `ADMIN_PASSWORD`, se ainda não existir.
+- O usuário pode alterar o próprio nome e CEP. **O e-mail não pode ser alterado**, porque é o login da conta e o canal da recuperação de senha; campos como `email` e `perfil` enviados na edição são ignorados.
+- Para trocar a senha, é preciso informar a senha atual. Depois da troca, os tokens emitidos antes deixam de valer.
+- Para excluir a própria conta, é preciso confirmar a senha. A exclusão remove os animais do usuário e os pedidos que ele fez; animais de outras pessoas que ficarem sem pedidos pendentes voltam para `DISPONIVEL`.
+- Contas com adoção concluída (como dono ou como adotante) não podem ser excluídas (`409`), para preservar o histórico.
+- O administrador pode promover um usuário a `ADMIN` ou voltá-lo a `COMUM`, mas não pode alterar o próprio perfil.
+- Administradores não podem ser excluídos nem excluir a própria conta (`403`), para que o sistema nunca fique sem administrador.
 
 ### Animais
 - Todo animal é cadastrado como cachorro ou como gato (`especie`), com os dados específicos da espécie em `cachorro` ou `gato`. O animal e seus dados específicos são criados na mesma transação.
@@ -146,6 +165,13 @@ O schema correspondente está em `prisma/schema.prisma`.
 - Só o dono do animal ou um administrador pode editá-lo ou excluí-lo (`403` caso contrário).
 - Animal com status `ADOTADO` não pode ser editado nem excluído (`409`), para preservar o histórico.
 - Ao excluir um animal ainda não adotado, os pedidos dele são excluídos junto.
+
+### Fotos dos animais
+- Só o dono do animal ou um administrador envia e remove fotos. Animal `ADOTADO` não recebe nem perde fotos (`409`).
+- Cada animal pode ter até 5 fotos (`409` acima disso), em JPG, PNG ou WEBP (`400` para outros tipos), com até 5 MB cada (`413`).
+- As imagens ficam no Cloudinary; o banco guarda só o link e o identificador de cada uma.
+- Ao remover uma foto ou excluir o animal, os arquivos também são apagados do Cloudinary.
+- Se o Cloudinary não estiver configurado, o envio de fotos responde `503` e o restante do sistema funciona normalmente.
 
 ### Pedidos de adoção
 - O usuário não pode pedir para adotar o próprio animal (`403`).
@@ -161,15 +187,25 @@ O schema correspondente está em `prisma/schema.prisma`.
 - Um pedido só pode ser visto pelo adotante, pelo dono do animal ou por um administrador.
 - **Não existe exclusão de pedidos:** eles são cancelados ou recusados, para manter o histórico do processo de adoção.
 
+### Notificações por e-mail
+- Quando um pedido é criado, o dono do animal recebe um e-mail com o nome do interessado e o motivo.
+- Quando o pedido é aprovado ou recusado, quem pediu recebe um e-mail com a decisão.
+- Uma falha no envio do e-mail não desfaz o pedido nem a decisão: o erro fica registrado apenas no log do servidor.
+
 ## Perfis e permissões
 
 | Recurso | Ação | Visitante (sem login) | Usuário Comum | Administrador |
 |---|---|---|---|---|
-| Usuário | Ver o próprio perfil | ❌ | ✅ | ✅ |
-| Usuário | Listar todos os usuários | ❌ | ❌ | ✅ |
+| Usuário | Ver e editar o próprio perfil | ❌ | ✅ | ✅ |
+| Usuário | Trocar a própria senha | ❌ | ✅ | ✅ |
+| Usuário | Excluir a própria conta | ❌ | ✅ | ❌ |
+| Usuário | Listar e ver usuários | ❌ | ❌ | ✅ |
+| Usuário | Alterar o perfil de outro usuário | ❌ | ❌ | ✅ |
+| Usuário | Excluir outro usuário | ❌ | ❌ | ✅ (exceto administradores) |
 | Animal | Listar e visualizar | ✅ | ✅ | ✅ |
 | Animal | Cadastrar | ❌ | ✅ | ✅ |
 | Animal | Editar e excluir | ❌ | Somente os próprios | ✅ |
+| Foto | Enviar e remover | ❌ | Somente dos próprios animais | ✅ |
 | Pedido | Criar | ❌ | ✅ (exceto para animal próprio) | ✅ |
 | Pedido | Listar os próprios pedidos | ❌ | ✅ | ✅ |
 | Pedido | Listar os pedidos de um animal | ❌ | Somente dos próprios animais | ✅ |
@@ -182,23 +218,31 @@ O schema correspondente está em `prisma/schema.prisma`.
 ## Autenticação e segurança
 
 - **Login com JWT:** `POST /auth/login` devolve um token que deve ser enviado nas rotas protegidas no cabeçalho `Authorization: Bearer <token>`. O token expira conforme `JWT_EXPIRES_IN` (padrão: 1 hora).
-- **Sem token, ou com token inválido ou expirado:** `401`. **Perfil sem permissão:** `403`.
+- **Sem token, ou com token inválido ou expirado:** `401`. **Perfil sem permissão:** `403`. O perfil é conferido no banco a cada requisição, então uma mudança de perfil vale imediatamente.
 - **Mensagem única no login:** e-mail inexistente e senha errada retornam a mesma mensagem, para não revelar quais e-mails estão cadastrados.
 - **Recuperação de senha:**
   - `POST /auth/forgot-password` sempre responde a mesma mensagem, exista o e-mail ou não.
   - O código enviado por e-mail é aleatório (256 bits), vale por `RESET_TOKEN_EXPIRES_MINUTES` minutos (padrão: 15) e pode ser usado uma única vez.
   - No banco fica guardado apenas o hash SHA-256 do código, nunca o código em si.
   - Pedir um novo código invalida os anteriores.
-  - Ao redefinir a senha, todos os tokens JWT emitidos antes da troca deixam de valer.
-- **Erros:** respostas de erro nunca expõem detalhes internos. Erros inesperados retornam `500` com mensagem genérica.
+  - Ao redefinir ou trocar a senha, todos os tokens JWT emitidos antes da troca deixam de valer.
+- **Limite de tentativas (`429`):** login (20 a cada 15 minutos), cadastro (20 por hora) e recuperação de senha (5 a cada 15 minutos), por endereço IP.
+- **Cabeçalhos de segurança:** aplicados com Helmet; o cabeçalho `X-Powered-By` é removido.
+- **Limite de tamanho:** o corpo JSON das requisições é limitado a 100 kB (`413`); as fotos, a 5 MB.
+- **Erros:** respostas de erro nunca expõem detalhes internos. Erros conhecidos do banco são traduzidos (registro inexistente `404`, conflito `409`, banco indisponível `503`), e erros inesperados retornam `500` com mensagem genérica.
+- **Credenciais:** ficam apenas no `.env`, que não é versionado. Em produção, a API se recusa a iniciar com o `JWT_SECRET` de exemplo.
+- **Dependências:** auditadas com `npm audit`. Os alertas restantes estão em ferramentas de desenvolvimento (CLI do Prisma e nodemon) ou não se aplicam ao projeto (o alerta do Zod trata de listas muito grandes, e nenhum schema valida listas).
 
-## Integração externa
+## Integrações externas
 
-**ViaCEP** (https://viacep.com.br): no cadastro de usuários, a API preenche logradouro, bairro, cidade e UF a partir do CEP. Isso padroniza o endereço e permite filtrar animais por cidade e estado do dono. A API é gratuita e não exige chave.
+| Serviço | Uso no sistema | Configuração |
+|---|---|---|
+| **ViaCEP** (https://viacep.com.br) | No cadastro e na edição do perfil, preenche logradouro, bairro, cidade e UF a partir do CEP. Isso padroniza o endereço e permite filtrar animais por cidade e estado do dono. | Nenhuma: gratuito e sem chave |
+| **Cloudinary** (https://cloudinary.com) | Armazena as fotos dos animais e entrega cada uma por um link público. A foto é o que mais pesa na decisão de quem adota; as imagens ficam fora do banco e do container, e o banco guarda só os links. | Opcional: conta gratuita e 3 variáveis no `.env` (veja [Fotos dos animais](#fotos-dos-animais-opcional)) |
 
 ## Arquitetura
 
-O projeto segue princípios de Clean Architecture. As regras de negócio (casos de uso) não importam Express, Prisma, bcrypt, JWT nem Nodemailer: recebem pelo construtor objetos com os métodos de que precisam. O único lugar que conhece as implementações concretas é o `src/container.js`.
+O projeto segue princípios de Clean Architecture. As regras de negócio (casos de uso) não importam Express, Prisma, bcrypt, JWT, Nodemailer nem Cloudinary: recebem pelo construtor objetos com os métodos de que precisam. O único lugar que conhece as implementações concretas é o `src/container.js`. Por isso as regras podem ser testadas sem banco, sem e-mail e sem serviços externos.
 
 ```
 src/
@@ -211,20 +255,26 @@ src/
 ├── application/
 │   ├── use-cases/        # Regras de negócio
 │   │   ├── auth/         # Cadastro, login e recuperação de senha
-│   │   ├── usuarios/
-│   │   ├── animais/      # CRUD de animais
-│   │   └── pedidos/      # Pedidos de adoção
+│   │   ├── usuarios/     # Perfil, senha, exclusão de conta e administração
+│   │   ├── animais/      # CRUD de animais e fotos
+│   │   └── pedidos/      # Pedidos de adoção e notificações
 │   └── utils/
 ├── infra/                # Implementações técnicas
-│   ├── database/         # Prisma e repositórios
+│   ├── database/         # Prisma, repositórios e tradução de erros do banco
 │   ├── security/         # bcrypt, JWT e geração de código de recuperação
 │   ├── mail/             # Envio de e-mail (Nodemailer)
-│   └── cep/              # Integração com o ViaCEP
+│   ├── cep/              # Integração com o ViaCEP
+│   └── storage/          # Integração com o Cloudinary
 ├── interfaces/
 │   └── http/             # Rotas, controllers, validações e middlewares do Express
 ├── container.js          # Monta as dependências e liga as camadas
 ├── app.js                # Montagem da aplicação Express
 └── server.js             # Inicialização do servidor
+
+tests/unit/               # Testes automatizados das regras de negócio
+prisma/                   # Schema, migrations e dados de exemplo (seed)
+.github/workflows/        # Integração contínua (GitHub Actions)
+docs/collection.json      # Collection do Postman
 ```
 
 Todos os erros passam por um middleware global (`interfaces/http/middlewares/errorHandler.js`), que devolve respostas no formato `{ "error": { "message": "..." } }` e nunca expõe detalhes internos.
@@ -247,16 +297,21 @@ Todos os erros passam por um middleware global (`interfaces/http/middlewares/err
    cp .env.example .env
    ```
    No Windows (PowerShell): `Copy-Item .env.example .env`
-3. Suba o ambiente:
+3. *(Opcional)* Para ativar o envio de fotos, preencha as variáveis do Cloudinary no `.env`, conforme [Fotos dos animais](#fotos-dos-animais-opcional). Sem elas, todo o resto funciona.
+4. Suba o ambiente:
    ```bash
    docker-compose up --build
    ```
    Sobem três serviços: o banco (PostgreSQL), o Mailpit (servidor de e-mail de testes) e a API. As migrations são aplicadas e o administrador inicial é criado automaticamente.
-4. Verifique se está tudo funcionando:
+5. Verifique se está tudo funcionando:
    ```bash
    curl http://localhost:3000/health
    ```
    Resposta esperada: `{"status":"ok","database":"ok"}`
+6. *(Recomendado)* Em outro terminal, crie os dados de exemplo:
+   ```bash
+   docker compose exec api npm run seed
+   ```
 
 ### Serviços disponíveis
 
@@ -265,21 +320,43 @@ Todos os erros passam por um middleware global (`interfaces/http/middlewares/err
 | API | `http://localhost:3000` |
 | Caixa de e-mails (Mailpit) | `http://localhost:8025` |
 
-### Administrador inicial
+### Usuários para teste
 
-| E-mail | Senha |
-|---|---|
-| `admin@adocao.local` | `Admin@12345` |
+| Perfil | E-mail | Senha | Situação |
+|---|---|---|---|
+| Administrador | `admin@adocao.local` | `Admin@12345` | Criado automaticamente ao iniciar a API |
+| Comum | `ana@exemplo.com` | `senha12345` | Dona do cachorro Rakan e da gata Zoe; tem um pedido pendente para responder |
+| Comum | `bruno@exemplo.com` | `senha12345` | Dono do cachorro Thor e da gata Luna |
+| Comum | `carla@exemplo.com` | `senha12345` | Pediu o Rakan e já adotou a Luna |
 
-Esses valores vêm de `ADMIN_EMAIL` e `ADMIN_PASSWORD` no `.env` e servem apenas para o ambiente local.
+Os usuários comuns são criados pelo comando `npm run seed` (passo 6). O seed pode ser executado mais de uma vez sem duplicar dados. Todos esses valores servem apenas para o ambiente local.
 
-### Testar a recuperação de senha
+### Testar a recuperação de senha e as notificações
 
 1. Envie `POST /auth/forgot-password` com o e-mail de um usuário cadastrado.
 2. Abra `http://localhost:8025`. O e-mail "Recuperação de senha" aparece na caixa de entrada com o código.
 3. Envie `POST /auth/reset-password` com o código e a nova senha.
 
-Nenhum e-mail real é enviado: o Mailpit captura todas as mensagens localmente.
+As notificações de pedidos aparecem na mesma caixa: entre como `ana@exemplo.com` e aprove o pedido pendente do Rakan, e o e-mail de aprovação para `carla@exemplo.com` aparece no Mailpit. Nenhum e-mail real é enviado: o Mailpit captura todas as mensagens localmente.
+
+### Fotos dos animais (opcional)
+
+O envio de fotos usa o Cloudinary, que exige uma conta gratuita:
+
+1. Crie a conta em https://cloudinary.com.
+2. No painel, abra **API Keys** e copie o **Cloud name**, a **API Key** e o **API Secret**.
+3. Preencha no `.env`:
+   ```
+   CLOUDINARY_CLOUD_NAME=seu_cloud_name
+   CLOUDINARY_API_KEY=sua_api_key
+   CLOUDINARY_API_SECRET=seu_api_secret
+   ```
+4. Reinicie o ambiente: `docker-compose down` e `docker-compose up --build`.
+
+Para enviar uma foto, use a requisição **Enviar foto** da collection (selecionando um arquivo no campo `foto`) ou:
+```bash
+curl -X POST http://localhost:3000/animais/1/fotos -H "Authorization: Bearer <token>" -F "foto=@caminho/da/imagem.jpg"
+```
 
 ### Variáveis de ambiente
 
@@ -299,6 +376,7 @@ Nenhum e-mail real é enviado: o Mailpit captura todas as mensagens localmente.
 | `MAILPIT_UI_PORT` | Porta da caixa de e-mails no seu computador | `8025` |
 | `MAILPIT_SMTP_PORT` | Porta SMTP do Mailpit no seu computador | `1025` |
 | `ADMIN_NAME` / `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Dados do administrador inicial | ver `.env.example` |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | Credenciais do Cloudinary (opcionais) | vazio (fotos desativadas) |
 
 Se alguma das portas já estiver em uso no seu computador, altere a variável correspondente no `.env`.
 
@@ -308,8 +386,40 @@ Com o banco e o Mailpit rodando pelo Docker (`docker-compose up -d db mailpit`):
 ```bash
 npm install
 npx prisma migrate dev
+npm run seed
 npm run dev
 ```
+
+## Testes automatizados
+
+As regras de negócio têm 23 testes automatizados, escritos com o `node:test` (nativo do Node.js). Eles usam versões falsas do banco, do e-mail, do ViaCEP e do Cloudinary, então rodam em segundos e não precisam de Docker:
+
+```bash
+npm install
+npm test
+```
+
+Os testes cobrem, entre outros: cadastro e login, recuperação de senha com código expirado ou reutilizado, permissões de dono, adotante e administrador, regras dos pedidos, proteção de animais adotados, exclusão de conta, notificações por e-mail e fotos.
+
+O GitHub Actions (`.github/workflows/testes.yml`) roda os testes automaticamente a cada push nas branches `main` e `develop` e a cada Pull Request.
+
+## Collection do Postman
+
+A collection com todas as rotas está em **`docs/collection.json`**.
+
+**Como importar:** no Postman, clique em **Import**, selecione o arquivo `docs/collection.json` e confirme.
+
+**Configuração:** nenhuma é obrigatória. A collection já vem com a variável `baseUrl` = `http://localhost:3000`. Os tokens e IDs são preenchidos automaticamente pelas próprias requisições:
+- as requisições de **login** salvam o token em `tokenAdmin`, `tokenAna` ou `tokenCarla`;
+- **Cadastrar cachorro**, **Criar pedido** e **Enviar foto** salvam o ID criado em `animalId`, `pedidoId` e `fotoId`.
+
+**Ordem sugerida**, depois de rodar o seed:
+1. Pasta **1. Autenticação**: faça os três logins (admin, Ana e Carla).
+2. Pasta **3. Animais**: liste, cadastre um cachorro com a Ana e teste edição e filtros.
+3. Pasta **5. Pedidos**: crie um pedido com a Carla e aprove com a Ana. Confira o e-mail no Mailpit.
+4. Pastas **2. Usuários**, **4. Fotos** e **6. Administração** em qualquer ordem.
+
+Para a recuperação de senha, copie o código do e-mail no Mailpit para a variável `codigoRecuperacao` (aba **Variables** da collection) antes de enviar **Redefinir senha**.
 
 ## Endpoints
 
@@ -317,7 +427,7 @@ Formato de erro em todas as rotas:
 ```json
 { "error": { "message": "Descrição do erro" } }
 ```
-Erros de validação (`400`) trazem também `details`, com o campo e a mensagem de cada problema.
+Erros de validação (`400`) trazem também `details`, com o campo e a mensagem de cada problema. Em qualquer rota, um corpo maior que o permitido retorna `413`, e um erro inesperado retorna `500` com mensagem genérica.
 
 ### Resumo
 
@@ -329,12 +439,20 @@ Erros de validação (`400`) trazem também `details`, com o campo e a mensagem 
 | GET | `/auth/me` | Dados do usuário autenticado | Autenticado |
 | POST | `/auth/forgot-password` | Envia o código de recuperação por e-mail | Público |
 | POST | `/auth/reset-password` | Redefine a senha com o código recebido | Público |
+| PATCH | `/usuarios/me` | Altera nome e CEP do próprio perfil | Autenticado |
+| PATCH | `/usuarios/me/senha` | Troca a própria senha | Autenticado |
+| DELETE | `/usuarios/me` | Exclui a própria conta | Autenticado (exceto administradores) |
 | GET | `/usuarios` | Lista todos os usuários | Administrador |
+| GET | `/usuarios/:id` | Detalhes de um usuário | Administrador |
+| PATCH | `/usuarios/:id/perfil` | Altera o perfil de um usuário | Administrador |
+| DELETE | `/usuarios/:id` | Exclui um usuário | Administrador |
 | GET | `/animais` | Lista animais, com filtros e paginação | Público |
-| GET | `/animais/:id` | Detalhes de um animal | Público |
+| GET | `/animais/:id` | Detalhes de um animal, com fotos | Público |
 | POST | `/animais` | Cadastra um animal | Autenticado |
 | PATCH | `/animais/:id` | Altera um animal | Dono ou administrador |
 | DELETE | `/animais/:id` | Exclui um animal | Dono ou administrador |
+| POST | `/animais/:id/fotos` | Envia uma foto do animal | Dono ou administrador |
+| DELETE | `/animais/:id/fotos/:fotoId` | Remove uma foto do animal | Dono ou administrador |
 | POST | `/animais/:id/pedidos` | Faz um pedido de adoção | Autenticado (exceto o dono) |
 | GET | `/animais/:id/pedidos` | Lista os pedidos recebidos por um animal | Dono ou administrador |
 | GET | `/pedidos/meus` | Lista os pedidos feitos pelo usuário | Autenticado |
@@ -347,7 +465,7 @@ Erros de validação (`400`) trazem também `details`, com o campo e a mensagem 
 
 Rotas marcadas como autenticadas exigem o cabeçalho `Authorization: Bearer <token>`.
 
-**Paginação:** as listagens aceitam `pagina` (padrão `1`) e `limite` (padrão `10`, máximo `50`) na query string e respondem no formato:
+**Paginação:** as listagens de animais e pedidos aceitam `pagina` (padrão `1`) e `limite` (padrão `10`, máximo `50`) na query string e respondem no formato:
 ```json
 {
   "dados": [],
@@ -397,7 +515,7 @@ Rotas marcadas como autenticadas exigem o cabeçalho `Authorization: Bearer <tok
   "atualizadoEm": "2026-10-18T12:00:00.000Z"
 }
 ```
-**Erros:** `400` dados inválidos · `409` e-mail já cadastrado · `422` CEP não encontrado · `503` ViaCEP indisponível.
+**Erros:** `400` dados inválidos · `409` e-mail já cadastrado · `422` CEP não encontrado · `429` muitas tentativas · `503` ViaCEP indisponível.
 
 ### POST `/auth/login`
 
@@ -419,7 +537,7 @@ Rotas marcadas como autenticadas exigem o cabeçalho `Authorization: Bearer <tok
 ```
 O objeto `usuario` traz os mesmos campos da resposta do cadastro.
 
-**Erros:** `400` dados inválidos · `401` e-mail ou senha inválidos.
+**Erros:** `400` dados inválidos · `401` e-mail ou senha inválidos · `429` muitas tentativas.
 
 ### GET `/auth/me`
 
@@ -443,7 +561,7 @@ O objeto `usuario` traz os mesmos campos da resposta do cadastro.
 ```json
 { "message": "Se o e-mail estiver cadastrado, você receberá as instruções para redefinir a senha." }
 ```
-**Erros:** `400` dados inválidos.
+**Erros:** `400` dados inválidos · `429` muitas tentativas.
 
 ### POST `/auth/reset-password`
 
@@ -460,7 +578,63 @@ O objeto `usuario` traz os mesmos campos da resposta do cadastro.
 ```json
 { "message": "Senha redefinida com sucesso. Faça login com a nova senha." }
 ```
-**Erros:** `400` dados inválidos, ou código inválido, expirado ou já utilizado.
+**Erros:** `400` dados inválidos, ou código inválido, expirado ou já utilizado · `429` muitas tentativas.
+
+### PATCH `/usuarios/me`
+
+**Cabeçalho:** `Authorization: Bearer <token>`
+
+Envie pelo menos um dos campos. O e-mail não pode ser alterado.
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `nome` | texto | Não | 2 a 100 caracteres |
+| `cep` | texto | Não | 8 dígitos, com ou sem hífen. O endereço é atualizado pelo ViaCEP |
+
+**Requisição:**
+```json
+{ "nome": "Maria Souza", "cep": "01310-100" }
+```
+**Resposta `200`:** o usuário atualizado, no mesmo formato da resposta do cadastro.
+
+**Erros:** `400` dados inválidos · `401` não autenticado · `422` CEP não encontrado · `503` ViaCEP indisponível.
+
+### PATCH `/usuarios/me/senha`
+
+**Cabeçalho:** `Authorization: Bearer <token>`
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `senhaAtual` | texto | Sim | Senha atual do usuário |
+| `novaSenha` | texto | Sim | 8 a 72 caracteres, diferente da atual |
+
+**Requisição:**
+```json
+{ "senhaAtual": "senhaSegura123", "novaSenha": "novaSenha456" }
+```
+**Resposta `200`:**
+```json
+{ "message": "Senha alterada com sucesso. Faça login novamente com a nova senha." }
+```
+Os tokens emitidos antes da troca deixam de valer.
+
+**Erros:** `400` dados inválidos, senha atual incorreta ou nova senha igual à atual · `401` não autenticado.
+
+### DELETE `/usuarios/me`
+
+**Cabeçalho:** `Authorization: Bearer <token>`
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `senha` | texto | Sim | Senha atual, para confirmar a exclusão |
+
+**Requisição:**
+```json
+{ "senha": "senhaSegura123" }
+```
+**Resposta `204`:** sem conteúdo. Os animais do usuário e os pedidos que ele fez são excluídos.
+
+**Erros:** `400` dados inválidos ou senha incorreta · `401` não autenticado · `403` administrador · `409` conta com adoção concluída.
 
 ### GET `/usuarios`
 
@@ -469,6 +643,38 @@ O objeto `usuario` traz os mesmos campos da resposta do cadastro.
 **Resposta `200`:** lista de usuários, cada um no mesmo formato da resposta do cadastro.
 
 **Erros:** `401` não autenticado · `403` usuário sem perfil de administrador.
+
+### GET `/usuarios/:id`
+
+**Cabeçalho:** `Authorization: Bearer <token de administrador>`
+
+**Resposta `200`:** o usuário, no mesmo formato da resposta do cadastro.
+
+**Erros:** `400` ID inválido · `401` não autenticado · `403` não é administrador · `404` usuário não encontrado.
+
+### PATCH `/usuarios/:id/perfil`
+
+**Cabeçalho:** `Authorization: Bearer <token de administrador>`
+
+| Campo | Tipo | Obrigatório | Regras |
+|---|---|---|---|
+| `perfil` | texto | Sim | `COMUM` ou `ADMIN` |
+
+**Requisição:**
+```json
+{ "perfil": "ADMIN" }
+```
+**Resposta `200`:** o usuário com o perfil atualizado. A mudança vale imediatamente.
+
+**Erros:** `400` dados inválidos ou tentativa de alterar o próprio perfil · `401` não autenticado · `403` não é administrador · `404` usuário não encontrado.
+
+### DELETE `/usuarios/:id`
+
+**Cabeçalho:** `Authorization: Bearer <token de administrador>`
+
+**Resposta `204`:** sem conteúdo. Os animais do usuário e os pedidos que ele fez são excluídos.
+
+**Erros:** `400` ID inválido · `401` não autenticado · `403` não é administrador, ou o usuário alvo é administrador · `404` usuário não encontrado · `409` conta com adoção concluída.
 
 ### GET `/animais`
 
@@ -509,6 +715,9 @@ Público.
   "atualizadoEm": "2026-10-25T12:00:00.000Z",
   "dono": { "id": 2, "nome": "Maria Silva", "cidade": "São Paulo", "uf": "SP" },
   "especie": "CACHORRO",
+  "fotos": [
+    { "id": 1, "url": "https://res.cloudinary.com/exemplo/image/upload/adocao-animais/rex.jpg" }
+  ],
   "cachorro": { "porte": "GRANDE", "conviveComCachorros": true }
 }
 ```
@@ -579,6 +788,32 @@ Envie só os campos que quer alterar (pelo menos um). Os campos são os mesmos d
 **Resposta `204`:** sem conteúdo. Os pedidos do animal são excluídos junto.
 
 **Erros:** `401` não autenticado · `403` não é o dono · `404` animal não encontrado · `409` animal já adotado.
+
+### POST `/animais/:id/fotos`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (dono do animal ou administrador)
+
+**Corpo:** `multipart/form-data`, com a imagem no campo **`foto`** (JPG, PNG ou WEBP, até 5 MB).
+
+**Exemplo:**
+```bash
+curl -X POST http://localhost:3000/animais/1/fotos \
+  -H "Authorization: Bearer <token>" \
+  -F "foto=@rex.jpg"
+```
+**Resposta `201`:**
+```json
+{ "id": 1, "url": "https://res.cloudinary.com/exemplo/image/upload/adocao-animais/rex.jpg" }
+```
+**Erros:** `400` arquivo ausente ou que não é imagem · `401` não autenticado · `403` não é o dono · `404` animal não encontrado · `409` animal adotado ou limite de 5 fotos · `413` arquivo maior que 5 MB · `503` Cloudinary não configurado ou indisponível.
+
+### DELETE `/animais/:id/fotos/:fotoId`
+
+**Cabeçalho:** `Authorization: Bearer <token>` (dono do animal ou administrador)
+
+**Resposta `204`:** sem conteúdo. A imagem também é apagada do Cloudinary.
+
+**Erros:** `400` ID inválido · `401` não autenticado · `403` não é o dono · `404` animal ou foto não encontrados · `409` animal já adotado.
 
 ### POST `/animais/:id/pedidos`
 
@@ -685,7 +920,3 @@ Sem corpo. Se o animal não tiver mais pedidos pendentes, ele volta para `DISPON
 **Resposta `200`:** o pedido com status `CANCELADO`.
 
 **Erros:** `401` não autenticado · `403` não é o adotante · `404` pedido não encontrado · `409` pedido não está pendente.
-
-## Collection
-
-A collection do Postman será adicionada em `docs/collection.json` conforme os endpoints forem implementados.
