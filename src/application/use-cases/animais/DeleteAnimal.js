@@ -3,7 +3,7 @@ const { StatusAnimal } = require('../../../domain/constants');
 const { podeGerenciarAnimal } = require('../../../domain/policies/permissoes');
 
 class DeleteAnimal {
-  constructor({ animalRepository }) {
+  constructor({ animalRepository, imageStorage }) {
     this.animalRepository = animalRepository;
     this.imageStorage = imageStorage;
   }
