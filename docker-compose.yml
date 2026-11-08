@@ -47,7 +47,10 @@ services:
       MAIL_FROM: ${MAIL_FROM:-Adoção de Animais <nao-responda@adocao.local>}
       ADMIN_NAME: ${ADMIN_NAME:-Administrador}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@adocao.local}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@12345}  
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@12345}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
     ports:
       - "${API_PORT:-3000}:3000"
 

@@ -2,8 +2,10 @@ const { Router } = require('express');
 
 const { animalController, pedidoController, authenticate } = require('../../../container');
 const validate = require('../middlewares/validate');
+const uploadImagem = require('../middlewares/uploadImagem');
 const {
   idParamSchema,
+  fotoParamSchema,
   createAnimalSchema,
   updateAnimalSchema,
   listAnimalsQuerySchema,
@@ -24,6 +26,20 @@ router.patch(
   animalController.update,
 );
 router.delete('/:id', authenticate, validate(idParamSchema, 'params'), animalController.remove);
+
+router.post(
+  '/:id/fotos',
+  authenticate,
+  validate(idParamSchema, 'params'),
+  uploadImagem,
+  animalController.addPhoto,
+);
+router.delete(
+  '/:id/fotos/:fotoId',
+  authenticate,
+  validate(fotoParamSchema, 'params'),
+  animalController.removePhoto,
+);
 
 router.post(
   '/:id/pedidos',

@@ -3,11 +3,12 @@ const { Especie } = require('../../domain/constants');
 function toAnimalResponse(animal) {
   if (!animal) return null;
 
-  const { cachorro, gato, usuarioId, ...dados } = animal;
+  const { cachorro, gato, usuarioId, fotos, ...dados } = animal;
 
   const resposta = {
     ...dados,
     especie: cachorro ? Especie.CACHORRO : Especie.GATO,
+    fotos: (fotos || []).map((foto) => ({ id: foto.id, url: foto.url })),
   };
 
   if (cachorro) {

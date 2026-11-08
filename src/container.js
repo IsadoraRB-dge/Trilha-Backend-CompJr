@@ -5,11 +5,14 @@ const PrismaUserRepository = require('./infra/database/repositories/PrismaUserRe
 const PrismaPasswordResetRepository = require('./infra/database/repositories/PrismaPasswordResetRepository');
 const PrismaAnimalRepository = require('./infra/database/repositories/PrismaAnimalRepository');
 const PrismaPedidoRepository = require('./infra/database/repositories/PrismaPedidoRepository');
+const PrismaFotoRepository = require('./infra/database/repositories/PrismaFotoRepository');
 const BcryptPasswordHasher = require('./infra/security/BcryptPasswordHasher');
 const JwtTokenService = require('./infra/security/JwtTokenService');
 const CryptoResetTokenGenerator = require('./infra/security/CryptoResetTokenGenerator');
 const NodemailerMailer = require('./infra/mail/NodemailerMailer');
 const ViaCepService = require('./infra/cep/ViaCepService');
+const CloudinaryImageStorage = require('./infra/storage/CloudinaryImageStorage');
+
 
 const RegisterUser = require('./application/use-cases/auth/RegisterUser');
 const LoginUser = require('./application/use-cases/auth/LoginUser');
@@ -30,6 +33,8 @@ const ListAnimals = require('./application/use-cases/animais/ListAnimals');
 const GetAnimal = require('./application/use-cases/animais/GetAnimal');
 const UpdateAnimal = require('./application/use-cases/animais/UpdateAnimal');
 const DeleteAnimal = require('./application/use-cases/animais/DeleteAnimal');
+const AddAnimalPhoto = require('./application/use-cases/animais/AddAnimalPhoto');
+const RemoveAnimalPhoto = require('./application/use-cases/animais/RemoveAnimalPhoto');
 
 const CreateAdoptionRequest = require('./application/use-cases/pedidos/CreateAdoptionRequest');
 const ListAdoptionRequests = require('./application/use-cases/pedidos/ListAdoptionRequests');
@@ -49,11 +54,14 @@ const userRepository = new PrismaUserRepository(prisma);
 const passwordResetRepository = new PrismaPasswordResetRepository(prisma);
 const animalRepository = new PrismaAnimalRepository(prisma);
 const pedidoRepository = new PrismaPedidoRepository(prisma);
+const fotoRepository = new PrismaFotoRepository(prisma);
 const passwordHasher = new BcryptPasswordHasher();
 const tokenService = new JwtTokenService({ secret: env.jwtSecret, expiresIn: env.jwtExpiresIn });
 const resetTokenGenerator = new CryptoResetTokenGenerator();
 const mailer = new NodemailerMailer({ ...env.smtp, from: env.mailFrom });
 const cepService = new ViaCepService({ baseUrl: env.viaCepUrl });
+const imageStorage = new CloudinaryImageStorage(env.cloudinary);
+
 
 // Casos de uso
 const registerUser = new RegisterUser({ userRepository, passwordHasher, cepService });
@@ -80,7 +88,9 @@ const createAnimal = new CreateAnimal({ animalRepository });
 const listAnimals = new ListAnimals({ animalRepository });
 const getAnimal = new GetAnimal({ animalRepository });
 const updateAnimal = new UpdateAnimal({ animalRepository });
-const deleteAnimal = new DeleteAnimal({ animalRepository });
+const deleteAnimal = new DeleteAnimal({ animalRepository, imageStorage });
+const addAnimalPhoto = new AddAnimalPhoto({ animalRepository, fotoRepository, imageStorage });
+const removeAnimalPhoto = new RemoveAnimalPhoto({ animalRepository, fotoRepository, imageStorage });
 
 const createAdoptionRequest = new CreateAdoptionRequest({
   animalRepository,
@@ -120,6 +130,8 @@ createAnimal,
   getAnimal,
   updateAnimal,
   deleteAnimal,
+  addAnimalPhoto,
+  removeAnimalPhoto,
 });
 
 const pedidoController = new PedidoController({

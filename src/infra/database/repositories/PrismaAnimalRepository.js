@@ -4,6 +4,7 @@ const INCLUDE = {
   cachorro: true,
   gato: true,
   dono: { select: { id: true, nome: true, cidade: true, uf: true } },
+  fotos: { select: { id: true, url: true, publicId: true }, orderBy: { id: 'asc' } },
 };
 
 class PrismaAnimalRepository {

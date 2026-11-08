@@ -89,6 +89,7 @@ model Animal {
   cachorro Cachorro?
   gato     Gato?
   pedidos  PedidoAdocao[]
+  fotos    FotoAnimal[]
 
   @@index([status])
   @@map("animal")
@@ -128,4 +129,17 @@ model PedidoAdocao {
 
   @@index([animalId, status])
   @@map("pedido_adocao")
+}
+
+model FotoAnimal {
+  id       Int      @id @default(autoincrement()) @map("id_foto")
+  animalId Int      @map("id_animal")
+  url      String   @db.VarChar(500)
+  publicId String   @map("public_id") @db.VarChar(255)
+  criadoEm DateTime @default(now()) @map("criado_em")
+
+  animal Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  @@index([animalId])
+  @@map("foto_animal")
 }
