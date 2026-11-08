@@ -2,6 +2,7 @@ const { Router } = require('express');
 
 const { authController, authenticate } = require('../../../container');
 const validate = require('../middlewares/validate');
+const { loginLimiter, cadastroLimiter, recuperacaoLimiter } = require('../middlewares/rateLimiters');
 const {
   registerSchema,
   loginSchema,
@@ -11,10 +12,10 @@ const {
 
 const router = Router();
 
-router.post('/register', validate(registerSchema), authController.register);
-router.post('/login', validate(loginSchema), authController.login);
+router.post('/register',  cadastroLimiter, validate(registerSchema), authController.register);
+router.post('/login', loginLimiter, validate(loginSchema), authController.login);
 router.get('/me', authenticate, authController.me);
-router.post('/forgot-password', validate(forgotPasswordSchema), authController.forgotPassword);
-router.post('/reset-password', validate(resetPasswordSchema), authController.resetPassword);
+router.post('/forgot-password', recuperacaoLimiter, validate(forgotPasswordSchema), authController.forgotPassword);
+router.post('/reset-password', recuperacaoLimiter, validate(resetPasswordSchema), authController.resetPassword);
 
 module.exports = router;

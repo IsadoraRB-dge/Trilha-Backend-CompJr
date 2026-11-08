@@ -31,4 +31,8 @@ if (!env.jwtSecret) {
   throw new Error('A variável de ambiente JWT_SECRET não foi definida. Confira o arquivo .env.');
 }
 
+if (process.env.NODE_ENV === 'production' && env.jwtSecret === 'troque_esta_chave_em_producao') {
+  throw new Error('Defina um JWT_SECRET próprio para rodar em produção.');
+}
+
 module.exports = env;

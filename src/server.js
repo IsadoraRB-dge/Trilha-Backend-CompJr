@@ -3,8 +3,6 @@ const env = require('./config/env');
 const { prisma } = require('./infra/database/prisma');
 const { ensureAdminUser } = require('./container');
 
-const PORT = process.env.PORT || 3000;
-
 async function iniciar() {
   await ensureAdminUser.execute(env.admin);
 
