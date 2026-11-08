@@ -2,9 +2,11 @@ const AppError = require('../../../domain/errors/AppError');
 const { StatusAnimal } = require('../../../domain/constants');
 
 class CreateAdoptionRequest {
-  constructor({ animalRepository, pedidoRepository }) {
+  constructor({ animalRepository, pedidoRepository, userRepository, mailer }) {
     this.animalRepository = animalRepository;
     this.pedidoRepository = pedidoRepository;
+    this.userRepository = userRepository;
+    this.mailer = mailer;
   }
 
   async execute({ animalId, solicitante, motivo }) {
@@ -32,7 +34,26 @@ class CreateAdoptionRequest {
       throw new AppError('Este animal já foi adotado', 409);
     }
 
+    await this.notificarDono(animal, pedido);
+
     return pedido;
+  }
+
+   async notificarDono(animal, pedido) {
+    if (!this.mailer || !this.userRepository) return;
+
+    try {
+      const dono = await this.userRepository.findById(animal.usuarioId);
+      await this.mailer.sendNovoPedido({
+        para: dono.email,
+        nomeDono: dono.nome,
+        nomeAnimal: animal.nome,
+        nomeAdotante: pedido.adotante.nome,
+        motivo: pedido.motivo,
+      });
+    } catch (err) {
+      console.error('Falha ao notificar o dono do animal:', err);
+    }
   }
 }
 
