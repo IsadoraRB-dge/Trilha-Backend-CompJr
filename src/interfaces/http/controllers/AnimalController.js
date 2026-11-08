@@ -1,10 +1,12 @@
 class AnimalController {
-  constructor({ createAnimal, listAnimals, getAnimal, updateAnimal, deleteAnimal }) {
+  constructor({ createAnimal, listAnimals, getAnimal, updateAnimal, deleteAnimal, addAnimalPhoto, removeAnimalPhoto }) {
     this.createAnimal = createAnimal;
     this.listAnimals = listAnimals;
     this.getAnimal = getAnimal;
     this.updateAnimal = updateAnimal;
     this.deleteAnimal = deleteAnimal;
+    this.addAnimalPhoto = addAnimalPhoto;
+    this.removeAnimalPhoto = removeAnimalPhoto;
   }
 
   create = async (req, res) => {
@@ -33,6 +35,24 @@ class AnimalController {
 
   remove = async (req, res) => {
     await this.deleteAnimal.execute({ id: req.validado.params.id, solicitante: req.usuario });
+    res.status(204).send();
+  };
+
+  addPhoto = async (req, res) => {
+    const foto = await this.addAnimalPhoto.execute({
+      animalId: req.validado.params.id,
+      solicitante: req.usuario,
+      arquivo: req.file,
+    });
+    res.status(201).json(foto);
+  };
+
+  removePhoto = async (req, res) => {
+    await this.removeAnimalPhoto.execute({
+      animalId: req.validado.params.id,
+      fotoId: req.validado.params.fotoId,
+      solicitante: req.usuario,
+    });
     res.status(204).send();
   };
 }

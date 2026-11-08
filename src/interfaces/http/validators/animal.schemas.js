@@ -96,9 +96,18 @@ const listAnimalsQuerySchema = z.object({
   ...paginacao,
 });
 
+const fotoParamSchema = z.object({
+  id: z.coerce.number({ invalid_type_error: 'ID inválido' }).int('ID inválido').positive('ID inválido'),
+  fotoId: z.coerce
+    .number({ invalid_type_error: 'ID da foto inválido' })
+    .int('ID da foto inválido')
+    .positive('ID da foto inválido'),
+});
+
 module.exports = {
   idParamSchema,
   createAnimalSchema,
   updateAnimalSchema,
   listAnimalsQuerySchema,
+  fotoParamSchema,
 };
