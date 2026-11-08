@@ -3,8 +3,9 @@ const { StatusPedido } = require('../../../domain/constants');
 const { podeGerenciarAnimal } = require('../../../domain/policies/permissoes');
 
 class DecideAdoptionRequest {
-  constructor({ pedidoRepository }) {
+  constructor({ pedidoRepository, mailer }) {
     this.pedidoRepository = pedidoRepository;
+    this.mailer = mailer;
   }
 
   async execute({ id, solicitante, decisao }) {
@@ -21,6 +22,8 @@ class DecideAdoptionRequest {
       throw new AppError('Só é possível decidir pedidos pendentes', 409);
     }
 
+    const aprovado = decisao === StatusPedido.APROVADO;
+
     const concluido =
       decisao === StatusPedido.APROVADO
         ? await this.pedidoRepository.approve({ id, animalId: pedido.animalId })
@@ -30,8 +33,26 @@ class DecideAdoptionRequest {
       throw new AppError('Só é possível decidir pedidos pendentes', 409);
     }
 
+    await this.notificarAdotante(pedido, aprovado);
+
     return this.pedidoRepository.findById(id);
   }
+
+  async notificarAdotante(pedido, aprovado) {
+    if (!this.mailer) return;
+
+    try {
+      await this.mailer.sendDecisaoPedido({
+        para: pedido.adotante.email,
+        nomeAdotante: pedido.adotante.nome,
+        nomeAnimal: pedido.animal.nome,
+        aprovado,
+      });
+    } catch (err) {
+      console.error('Falha ao notificar o adotante:', err);
+    }
+  }
+
 }
 
 module.exports = DecideAdoptionRequest;

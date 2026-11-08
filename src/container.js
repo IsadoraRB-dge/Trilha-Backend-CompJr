@@ -82,11 +82,17 @@ const getAnimal = new GetAnimal({ animalRepository });
 const updateAnimal = new UpdateAnimal({ animalRepository });
 const deleteAnimal = new DeleteAnimal({ animalRepository });
 
-const createAdoptionRequest = new CreateAdoptionRequest({ animalRepository, pedidoRepository });
+const createAdoptionRequest = new CreateAdoptionRequest({
+  animalRepository,
+  pedidoRepository,
+  userRepository,
+  mailer,
+});
+
 const listAdoptionRequests = new ListAdoptionRequests({ animalRepository, pedidoRepository });
 const getAdoptionRequest = new GetAdoptionRequest({ pedidoRepository });
 const updateAdoptionRequest = new UpdateAdoptionRequest({ pedidoRepository });
-const decideAdoptionRequest = new DecideAdoptionRequest({ pedidoRepository });
+const decideAdoptionRequest = new DecideAdoptionRequest({ pedidoRepository, mailer });
 const cancelAdoptionRequest = new CancelAdoptionRequest({ pedidoRepository });
 
 // Interface HTTP
