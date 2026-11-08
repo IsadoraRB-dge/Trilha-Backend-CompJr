@@ -3,8 +3,9 @@ const { StatusAnimal } = require('../../../domain/constants');
 const { podeGerenciarAnimal } = require('../../../domain/policies/permissoes');
 
 class DeleteAnimal {
-  constructor({ animalRepository }) {
+  constructor({ animalRepository, imageStorage }) {
     this.animalRepository = animalRepository;
+    this.imageStorage = imageStorage;
   }
 
   async execute({ id, solicitante }) {
@@ -22,6 +23,17 @@ class DeleteAnimal {
     }
 
     await this.animalRepository.delete(id);
+    await this.removerFotosDoArmazenamento(animal.fotos);
+  }
+
+   async removerFotosDoArmazenamento(fotos = []) {
+    if (!this.imageStorage?.configurado) return;
+
+    for (const foto of fotos) {
+      await this.imageStorage.remove(foto.publicId).catch((err) => {
+        console.error('Falha ao remover a foto do Cloudinary:', err);
+      });
+    }
   }
 }
 

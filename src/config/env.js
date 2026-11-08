@@ -17,6 +17,12 @@ const env = {
 
   viaCepUrl: process.env.VIACEP_URL || 'https://viacep.com.br/ws',
 
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+  },
+
   admin: {
     nome: process.env.ADMIN_NAME || 'Administrador',
     email: process.env.ADMIN_EMAIL,
